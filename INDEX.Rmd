@@ -1,0 +1,346 @@
+---
+title: "Elecciones Presidenciales 2021 (Segunda Vuelta) - Análisis de resultados"
+author: "Jimena Tantapoma y Rocío Bedoya"
+subtitle: 'Curso: POL304 - Estadística para el análisis político 2'
+output: 
+  flexdashboard::flex_dashboard:
+    navbar:
+      - { title: "About", href: "https://github.com/JimenaTC/VOTOAKEIKO2021" }
+      - { icon: "fa-question-circle", href: "https://google.com", align: right }
+    orientation: columns
+    vertical_layout: fill
+    
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+```
+
+```{r include=FALSE}
+library(rio)
+library(ggplot2)
+library(DT)
+library(kableExtra)
+library(modelsummary)
+```
+
+```{r include=FALSE}
+data = import("VOTOKEIKO2021.xlsx")
+mapDIS=sf::read_sf("DISTRITOS.shp") #shapefile
+```
+
+```{r include=FALSE}
+#Juntamos información con el shape:
+mapDIS2=merge(mapDIS,data,by.x='IDDIST',by.y='ubigeo_inei', all.x = T) #siempre primero el shape
+```
+
+
+# Resultados electorales
+
+Column {data-width=600}
+-----------------------------------------------------------------------
+
+### 
+
+```{r}
+mapDIS2$porcentaje_votos <- (mapDIS2$votos / mapDIS2$poblacion_electoral) * 100
+mapaleyendaL = ggplot(mapDIS2) + geom_sf() + theme_light()
+
+mapaleyL = mapaleyendaL + geom_sf(data = mapDIS2,
+                                   aes(fill = `porcentaje_votos`), color = "black")
+
+mapa2 = mapaleyL +
+  coord_sf() + 
+  scale_fill_gradient(low = "seashell", high = "dodgerblue2", breaks = seq(from = 0, to = 100, by = 20)) + 
+  theme_void() + 
+  
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    legend.position = "right",
+    legend.text = element_text(size = 8),
+    plot.title = element_text(color = "black", size = 10, face = "bold")
+  ) +
+  
+  labs(fill = " ", title = "% de votos válidos por Keiko - 2da vuelta")
+
+mapa2
+
+```
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### Tabla de resultados (votos válidos)
+
+
+```{r include=FALSE}
+data$VOTO <- round((data$votos / data$poblacion_electoral) * 100, 2)
+```
+
+```{r}
+vote = data[,c(4,13)]
+colnames(vote) <- c("DISTRITOS", "VOTOS")
+```
+
+
+```{r echo=FALSE}
+datatable(vote, filter = "top")
+```
+
+# Modelando el voto
+
+```{r include=FALSE}
+library(rio)
+votokeiko = import("VOTOKEIKO2021.xlsx")
+```
+
+
+```{r include=FALSE}
+datareg <- data.frame(
+  ubigeo_inei = votokeiko$ubigeo_inei,
+  distrito = votokeiko$distrito,
+  votos = round((votokeiko$votos / votokeiko$poblacion_electoral) * 100, 2),
+  poblacion_electoral = votokeiko$poblacion_electoral,
+  indigena_tasa = round((votokeiko$indigena / votokeiko$poblacion_total), 2),
+  fallecidos_pct = round((votokeiko$fallecidos / votokeiko$poblacion_total) * 100, 2),
+  porcentaje_pobreza = round(votokeiko$porcentaje_pobreza, 2),
+  Mujeres_tasa = round((votokeiko$Mujeres / votokeiko$poblacion_total), 2),
+  Hombres_tasa = round((votokeiko$Hombres / votokeiko$poblacion_total), 2)
+)
+```
+
+
+```{r include=FALSE}
+modelo1 <- formula(votos~indigena_tasa+fallecidos_pct+porcentaje_pobreza+Mujeres_tasa)
+reg1 <- lm(modelo1, data = datareg)
+summary(reg1)
+```
+
+```{r include=FALSE}
+modelo2 <- formula(votos~indigena_tasa+fallecidos_pct+porcentaje_pobreza+Mujeres_tasa+poblacion_electoral)
+reg2 <- lm(modelo2, data = datareg)
+summary(reg2)
+```
+
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+
+### Regresión Gaussiana
+
+```{r}
+library(modelsummary)
+models=list('Regresion Gauss(I)'=reg1,
+            'Regresion Gauss(II)'=reg2)
+modelsummary(models, title = "Resultados de todos los modelos",statistic = "conf.int",
+             stars = TRUE,
+             output = "kableExtra")
+```
+
+Column {data-width=700} {.tabset}
+-----------------------------------------------------------------------
+
+### Gráfico 1
+```{r}
+library(ggplot2)
+library(ggthemes)
+
+datareg$Atípico <- factor(ifelse(datareg$poblacion_electoral <= 10000, 1, 0))
+
+# Eliminar niveles no utilizados en la variable de factor
+datareg$Atípico <- droplevels(datareg$Atípico)
+
+p <- ggplot(datareg, aes(x = votos, y = porcentaje_pobreza, color = Atípico)) +
+  geom_point(size = 2, shape = 19) +
+  labs(
+    title = "Relación entre el % de voto a Keiko Fujimori con el % de pobreza por distrito",
+    subtitle = "Atípico (0): distritos con población electoral mayor a 10000",
+    x = "% de voto a Keiko Fujimori",
+    y = "% de pobreza por distrito"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 9,face="bold"),
+        plot.subtitle = element_text(hjust = 0.5, size = 8),
+        axis.title.x = element_text(size = 9),
+        axis.title.y = element_text(size = 9))
+
+print(p)
+
+```
+
+### Gráfico 2
+```{r}
+datareg_filtered <- subset(datareg, indigena_tasa >= 0 & indigena_tasa <= 1)
+
+p2 <- ggplot(datareg_filtered, aes(x = votos, y = indigena_tasa)) +
+  geom_point(size = 3, shape = 20, color = "darkgreen") +
+  labs(
+    title = "Relación entre el % de voto a Keiko Fujimori con la tasa de población indígena por distrito",
+    x = "% de voto a Keiko Fujimori",
+    y = "Tasa de población indígena"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 9, face="bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 10),
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10)
+  )
+
+print(p2)
+
+```
+
+### Gráfico 3
+
+```{r}
+# Ajusta los límites del eje Y
+ylim <- c(0, 4)
+
+# Define cortes para la variable de tasa de pobreza desde 0%
+cuts <- seq(0, max(datareg$porcentaje_pobreza), length.out = 4)
+
+# Agrega la variable de tasa de pobreza dividida en tres cortes
+datareg$porcentaje_pobreza_cuts <- cut(datareg$porcentaje_pobreza, breaks = cuts, include.lowest = TRUE)
+
+# Define colores para cada categoría de pobreza
+colores_pobreza <- c("gold", "darkorange", "red")
+
+# Crea el gráfico con la nueva variable
+p3 <- ggplot(datareg, aes(x = votos, y = fallecidos_pct, color = porcentaje_pobreza_cuts)) +
+  geom_point(size = 3, shape = 20) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  labs(
+    title = "Relación entre el % de voto a Keiko Fujimori con el % de fallecidos COVID-19 por distrito",
+    subtitle = "Separación por nivel de pobreza",
+    x = "% de voto a Keiko Fujimori",
+    y = "% de fallecidos por Covid-19",
+    color = "Nivel de Pobreza"
+  ) +
+  scale_color_manual(values = colores_pobreza) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 7, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 7),
+    axis.title.x = element_text(size = 10),
+    axis.title.y = element_text(size = 10),
+    axis.text.y = element_text(size = 8),  # Ajusta el tamaño del texto del eje Y
+    axis.text.x = element_text(size = 8)   # Ajusta el tamaño del texto del eje X
+  ) +
+  coord_cartesian(ylim = ylim)  # Ajusta los límites del eje Y
+
+print(p3)
+
+```
+
+# Clusters
+```{r include=FALSE}
+library(rio)
+voto = import("dataconvertida.xlsx")
+```
+
+```{r include=FALSE}
+library(BBmisc)
+boxplot(normalize(voto[,c(3,5,6,7,8)],method='standardize'))
+```
+
+```{r include=FALSE}
+voto[,c(3,5,6,7,8)]=normalize(voto[,c(3,5,6,7,8)],method='standardize')
+```
+
+```{r include=FALSE}
+dataClus=voto[,c(3,5,6,7,8)]
+row.names(dataClus)=voto$ubigeo_inei
+```
+
+```{r include=FALSE}
+library(cluster)
+g.dist = daisy(dataClus, metric="gower")
+```
+
+```{r include=FALSE}
+set.seed(123)
+library(factoextra)
+res.diana <- hcut(g.dist, k = 4,hc_func='diana')
+dataClus$diana=res.diana$cluster
+#hicimos Diana porque entre los 3 presentaba mejor silueta 
+head(dataClus,15)%>%kbl%>%kable_styling()
+```
+
+```{r include=FALSE}
+fviz_silhouette(res.diana,print.summary = F)
+```
+
+```{r include=FALSE}
+#Juntamos información con el shape:
+mapDIS3=merge(mapDIS,dataClus,by.x='IDDIST',by.y='row.names', all.x = T) #siempre primero el shape
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### 
+
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+
+mapaleyendaL2 = ggplot(mapDIS3) + geom_sf() + theme_light()
+
+mapaleyL2 = mapaleyendaL2 + geom_sf(data = mapDIS3,
+                                   aes(fill = factor(`diana`)), color = "black")
+
+mapa3 = mapaleyL2 +
+  coord_sf() + 
+  scale_fill_brewer(palette = "YlOrRd", na.translate = FALSE) +  # No mostrar NA en la leyenda
+  theme_void() + 
+  
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    legend.position = "right",
+    legend.text = element_text(size = 8),
+    plot.title = element_text(color = "black", size = 10, face = "bold")
+  ) +
+  
+  labs(fill = " ", title = "Distribución Espacial de Clusters: Mapa de Calor")
+
+mapa3
+
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Tabla de pertenencia distrital a Clusters
+
+```{r}
+tablita=data[,c(1,4)]
+```
+
+
+```{r}
+tabla2=merge(tablita,dataClus,by.x='ubigeo_inei',by.y='row.names', all.x = T)
+```
+
+```{r}
+library(dplyr)
+clusters = tabla2 %>% group_by(diana) %>%
+summarize (PRIMERPROMEDIO = mean(votos, na.rm = T),
+                    SEGUNDOPROMEDIO = mean(indigena_tasa, na.rm = T),
+                      TERCERPROMEDIO = mean(fallecidos_pct, na.rm = T),
+           CUARTOPROMEDIO = mean(porcentaje_pobreza, na.rm = T),
+           QUINTOPROMEDIO = mean(Mujeres_tasa, na.rm = T),
+                       NUMERODECLUSTERS = n())
+```
+
+
+```{r}
+colnames(clusters) <- c("CLUSTER", "PROMEDIO VOTO", "PROMEDIO INDÍGENA", "PROMEDIO FALLECIDOS", "PROMEDIO POBREZA", "PROMEDIO MUJERES", "NUMERO DE DISTRITOS")
+```
+
+
+```{r echo=FALSE}
+datatable(clusters)
+```
